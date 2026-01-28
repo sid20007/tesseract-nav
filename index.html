@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesseract Navigation - 4D Hypercube</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            background: radial-gradient(ellipse at center, #0a0a1a 0%, #000000 100%);
+            font-family: 'Courier New', monospace;
+            color: #00ffff;
+        }
+
+        canvas {
+            display: block;
+            cursor: grab;
+        }
+
+        canvas:active {
+            cursor: grabbing;
+        }
+
+        .ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid rgba(0, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+            z-index: 10;
+        }
+
+        .ui h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px #00ffff;
+        }
+
+        .ui p {
+            font-size: 12px;
+            color: #00cccc;
+            margin-bottom: 5px;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 30px;
+            border-radius: 10px;
+            border: 2px solid rgba(0, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-group label {
+            font-size: 11px;
+            color: #00cccc;
+        }
+
+        input[type="range"] {
+            width: 150px;
+            accent-color: #00ffff;
+        }
+
+        button {
+            background: linear-gradient(135deg, #00ffff 0%, #0080ff 100%);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+
+        .dimension-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid rgba(0, 255, 255, 0.3);
+            backdrop-filter: blur(10px);
+            max-width: 250px;
+        }
+
+        .dimension-info h3 {
+            color: #00ffff;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px #00ffff;
+        }
+
+        .dimension-info p {
+            font-size: 12px;
+            color: #00cccc;
+            line-height: 1.6;
+        }
+
+        .particle {
+            position: absolute;
+            pointer-events: none;
+            width: 2px;
+            height: 2px;
+            background: #00ffff;
+            border-radius: 50%;
+            box-shadow: 0 0 5px #00ffff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="ui">
+        <h1>TESSERACT</h1>
+        <p>4D Hypercube Navigation</p>
+        <p>Drag to rotate • Click faces to dive deeper</p>
+    </div>
+
+    <div class="dimension-info">
+        <h3>Current Dimension</h3>
+        <p id="dimension-text">Exploring the 4th dimension...</p>
+        <p style="margin-top: 10px; font-size: 10px; opacity: 0.7;">
+            A tesseract is to a cube what a cube is to a square.
+            You're witnessing a 3D projection of a 4D object.
+        </p>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>XY Rotation</label>
+            <input type="range" id="rotXY" min="0" max="628" value="0">
+        </div>
+        <div class="control-group">
+            <label>ZW Rotation</label>
+            <input type="range" id="rotZW" min="0" max="628" value="0">
+        </div>
+        <div class="control-group">
+            <label>XW Rotation</label>
+            <input type="range" id="rotXW" min="0" max="628" value="0">
+        </div>
+        <button id="reset">Reset View</button>
+        <button id="auto">Auto Rotate</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Tesseract vertices in 4D space
+        const vertices4D = [];
+        for (let i = 0; i < 16; i++) {
+            vertices4D.push([
+                (i & 1) ? 1 : -1,
+                (i & 2) ? 1 : -1,
+                (i & 4) ? 1 : -1,
+                (i & 8) ? 1 : -1
+            ]);
+        }
+
+        // Edges connecting vertices
+        const edges = [];
+        for (let i = 0; i < 16; i++) {
+            for (let j = i + 1; j < 16; j++) {
+                let diff = 0;
+                for (let k = 0; k < 4; k++) {
+                    if (vertices4D[i][k] !== vertices4D[j][k]) diff++;
+                }
+                if (diff === 1) edges.push([i, j]);
+            }
+        }
+
+        // Rotation angles
+        let angleXY = 0, angleYZ = 0, angleZW = 0, angleXW = 0, angleYW = 0, angleXZ = 0;
+        let autoRotate = false;
+        let mouseDown = false;
+        let lastMouseX = 0, lastMouseY = 0;
+
+        // Particles for trails
+        const particles = [];
+        const maxParticles = 200;
+
+        // UI elements
+        const rotXY = document.getElementById('rotXY');
+        const rotZW = document.getElementById('rotZW');
+        const rotXW = document.getElementById('rotXW');
+        const resetBtn = document.getElementById('reset');
+        const autoBtn = document.getElementById('auto');
+        const dimensionText = document.getElementById('dimension-text');
+
+        // 4D rotation matrices
+        function rotateXY(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x * cos - y * sin,
+                x * sin + y * cos,
+                z,
+                w
+            ];
+        }
+
+        function rotateZW(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x,
+                y,
+                z * cos - w * sin,
+                z * sin + w * cos
+            ];
+        }
+
+        function rotateXW(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x * cos - w * sin,
+                y,
+                z,
+                x * sin + w * cos
+            ];
+        }
+
+        function rotateYW(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x,
+                y * cos - w * sin,
+                z,
+                y * sin + w * cos
+            ];
+        }
+
+        function rotateXZ(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x * cos - z * sin,
+                y,
+                x * sin + z * cos,
+                w
+            ];
+        }
+
+        function rotateYZ(point, angle) {
+            const [x, y, z, w] = point;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            return [
+                x,
+                y * cos - z * sin,
+                y * sin + z * cos,
+                w
+            ];
+        }
+
+        // Project 4D to 3D to 2D
+        function project(point) {
+            let rotated = [...point];
+
+            // Apply all rotations
+            rotated = rotateXY(rotated, angleXY);
+            rotated = rotateYZ(rotated, angleYZ);
+            rotated = rotateZW(rotated, angleZW);
+            rotated = rotateXW(rotated, angleXW);
+            rotated = rotateYW(rotated, angleYW);
+            rotated = rotateXZ(rotated, angleXZ);
+
+            // 4D to 3D projection
+            const distance = 3;
+            const w = rotated[3];
+            const factor = distance / (distance - w);
+
+            const x3d = rotated[0] * factor;
+            const y3d = rotated[1] * factor;
+            const z3d = rotated[2] * factor;
+
+            // 3D to 2D projection (perspective)
+            const scale = 200;
+            const perspective = 600;
+            const factor2 = perspective / (perspective + z3d);
+
+            return {
+                x: canvas.width / 2 + x3d * scale * factor2,
+                y: canvas.height / 2 + y3d * scale * factor2,
+                z: z3d,
+                brightness: factor * 0.5 + 0.5
+            };
+        }
+
+        // Draw tesseract
+        function draw() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Project all vertices
+            const projected = vertices4D.map(v => project(v));
+
+            // Draw edges
+            edges.forEach(([i, j]) => {
+                const p1 = projected[i];
+                const p2 = projected[j];
+
+                const avgZ = (p1.z + p2.z) / 2;
+                const avgBrightness = (p1.brightness + p2.brightness) / 2;
+
+                // Color based on depth and brightness
+                const hue = 180 + avgZ * 20;
+                const alpha = 0.3 + avgBrightness * 0.7;
+
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+
+                const gradient = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
+                gradient.addColorStop(0, `hsla(${hue}, 100%, 50%, ${alpha * p1.brightness})`);
+                gradient.addColorStop(1, `hsla(${hue}, 100%, 50%, ${alpha * p2.brightness})`);
+
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 2;
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = `hsl(${hue}, 100%, 50%)`;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            });
+
+            // Draw vertices
+            projected.forEach((p, i) => {
+                const hue = 180 + p.z * 20;
+                const size = 3 + p.brightness * 3;
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${hue}, 100%, 70%, ${p.brightness})`;
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = `hsl(${hue}, 100%, 50%)`;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // Add particles occasionally
+                if (Math.random() < 0.02 && particles.length < maxParticles) {
+                    particles.push({
+                        x: p.x,
+                        y: p.y,
+                        vx: (Math.random() - 0.5) * 2,
+                        vy: (Math.random() - 0.5) * 2,
+                        life: 1.0,
+                        hue: hue
+                    });
+                }
+            });
+
+            // Update and draw particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.01;
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                ctx.fillStyle = `hsla(${p.hue}, 100%, 60%, ${p.life * 0.5})`;
+                ctx.fill();
+            }
+
+            // Auto rotation
+            if (autoRotate) {
+                angleXY += 0.005;
+                angleZW += 0.007;
+                angleXW += 0.003;
+                updateSliders();
+            }
+        }
+
+        function updateSliders() {
+            rotXY.value = (angleXY * 100) % 628;
+            rotZW.value = (angleZW * 100) % 628;
+            rotXW.value = (angleXW * 100) % 628;
+        }
+
+        function updateDimensionText() {
+            const texts = [
+                "Witnessing the impossible made visible...",
+                "4D shadows dancing in 3D space...",
+                "Traversing dimensions beyond perception...",
+                "The tesseract unfolds before you...",
+                "Reality bends at the fourth axis..."
+            ];
+            const index = Math.floor(Date.now() / 3000) % texts.length;
+            dimensionText.textContent = texts[index];
+        }
+
+        // Animation loop
+        function animate() {
+            draw();
+            updateDimensionText();
+            requestAnimationFrame(animate);
+        }
+
+        // Event listeners
+        canvas.addEventListener('mousedown', (e) => {
+            mouseDown = true;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (mouseDown) {
+                const dx = e.clientX - lastMouseX;
+                const dy = e.clientY - lastMouseY;
+
+                angleXY += dx * 0.01;
+                angleYZ += dy * 0.01;
+
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                updateSliders();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            mouseDown = false;
+        });
+
+        canvas.addEventListener('click', (e) => {
+            if (!mouseDown) {
+                // Create burst of particles on click
+                for (let i = 0; i < 20; i++) {
+                    particles.push({
+                        x: e.clientX,
+                        y: e.clientY,
+                        vx: (Math.random() - 0.5) * 10,
+                        vy: (Math.random() - 0.5) * 10,
+                        life: 1.0,
+                        hue: 180 + Math.random() * 60
+                    });
+                }
+            }
+        });
+
+        rotXY.addEventListener('input', (e) => {
+            angleXY = e.target.value / 100;
+        });
+
+        rotZW.addEventListener('input', (e) => {
+            angleZW = e.target.value / 100;
+        });
+
+        rotXW.addEventListener('input', (e) => {
+            angleXW = e.target.value / 100;
+        });
+
+        resetBtn.addEventListener('click', () => {
+            angleXY = angleYZ = angleZW = angleXW = angleYW = angleXZ = 0;
+            autoRotate = false;
+            updateSliders();
+        });
+
+        autoBtn.addEventListener('click', () => {
+            autoRotate = !autoRotate;
+            autoBtn.textContent = autoRotate ? 'Stop Auto' : 'Auto Rotate';
+            autoBtn.style.background = autoRotate
+                ? 'linear-gradient(135deg, #ff0080 0%, #ff8000 100%)'
+                : 'linear-gradient(135deg, #00ffff 0%, #0080ff 100%)';
+        });
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // Start animation
+        animate();
+    </script>
+</body>
+
+</html>
